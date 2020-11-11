@@ -1,0 +1,5 @@
+curl localhost:8080/identify
+curl localhost:8080/list
+curl localhost:8080/stream?id=11670844150766015395
+curl -X POST -H "Content-Type: application/json" --data '{"testy-test": "yup"}' localhost:8080/send?ids=11670844150766015395
+
