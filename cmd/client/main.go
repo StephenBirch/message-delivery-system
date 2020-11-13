@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -11,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/StephenBirch/message-delivery-system/client"
-	"github.com/gorilla/websocket"
+	"github.com/StephenBirch/message-delivery-system/types"
 )
 
 var (
@@ -27,42 +26,20 @@ func main() {
 		log.Fatal(err)
 	}
 
-	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://%s/ws?id=%d", c.Address, c.ID), nil)
+	conn, err := c.InitWebsocket()
 	if err != nil {
-		log.Fatal("dial:", err)
+		log.Fatalf("Failed to init websocket: %v", err)
 	}
 	defer conn.Close()
 
-	// go func for sending messages
 	go func() {
-		for {
-			select {
-			case msg := <-c.Sending:
-				b, err := json.Marshal(msg)
-				if err != nil {
-					fmt.Printf("Failed to Marshal msg: %v\n", err)
-					return
-				}
-
-				err = conn.WriteMessage(websocket.TextMessage, b)
-				if err != nil {
-					fmt.Println("write:", err)
-					return
-				}
-			}
-		}
+		err := c.WriteMessages(conn)
+		log.Fatalf("Websocket connection closed, exiting. Error was %v", err)
 	}()
 
-	// go func for receiving messages
 	go func() {
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				log.Printf("Failed to read message from websocket: %v\nExiting.", err)
-				os.Exit(1)
-			}
-			fmt.Printf("Incoming data: %s\n", message)
-		}
+		err := c.ReadMessages(conn)
+		log.Fatalf("Websocket connection closed, exiting. Error was %v", err)
 	}()
 
 	fmt.Printf("\nConnected to hub %s. Your ID: %d\n", *address, c.ID)
@@ -87,7 +64,7 @@ func main() {
 				fmt.Printf("Failed to get list of users: %v\n", err)
 				continue
 			}
-			fmt.Printf("Connected users: %v\n", ids)
+			fmt.Printf("Connected users: %v\n", ids.IDs)
 		// Relay message from stdin
 		case "3":
 			fmt.Printf("Enter the recipients IDs (CSV)\n> ")
@@ -111,7 +88,7 @@ func main() {
 				continue
 			}
 
-			c.Sending <- client.SendingMessage{Recipients: recipients, Data: scanner.Bytes()}
+			c.Sending <- types.SendingMessage{Recipients: recipients, Data: scanner.Bytes()}
 			continue
 		// Relay message from file
 		case "4":
@@ -141,16 +118,13 @@ func main() {
 				continue
 			}
 
-			c.Sending <- client.SendingMessage{Recipients: recipients, Data: b}
+			c.Sending <- types.SendingMessage{Recipients: recipients, Data: b}
 			continue
 		// Exit
 		case "5":
 			conn.Close()
 			fmt.Printf("Goodbye")
 			os.Exit(0)
-		default:
-			fmt.Println(helpText)
-			continue
 		}
 	}
 }

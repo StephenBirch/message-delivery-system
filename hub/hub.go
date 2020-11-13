@@ -11,17 +11,21 @@ import (
 	"sync"
 	"time"
 
-	"github.com/StephenBirch/message-delivery-system/client"
+	"github.com/StephenBirch/message-delivery-system/types"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
 
+var maxAttempts = 5 // If somehow the uint64 is taken try this many times
+
+// Hub struct represents a Hub, with both the Gin router and client map
 type Hub struct {
 	sync.Mutex
 	Router  *gin.Engine
 	Clients map[uint64]chan []byte
 }
 
+// New creates a Hub object, initing a map of all clients & setting the router up
 func New() *Hub {
 	h := &Hub{
 		Clients: make(map[uint64]chan []byte),
@@ -51,7 +55,7 @@ func (h *Hub) register(c *gin.Context) {
 		r := rand.New(rand.NewSource(time.Now().UnixNano()))
 		newID := r.Uint64()
 		for attempts := 0; !h.idInUse(newID); attempts++ {
-			if attempts > 10 {
+			if attempts > maxAttempts {
 				c.JSON(http.StatusInternalServerError, gin.H{"status": "Internal Server Error", "message": "Failed to find ID not in use"})
 				return
 			}
@@ -82,18 +86,36 @@ func (h *Hub) register(c *gin.Context) {
 
 // listUsers returns back an array of all userID's in use
 func (h *Hub) listUsers(c *gin.Context) {
-	var users client.ListResponse
+	if c.Query("id") == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request", "message": "IDs is required"})
+		return
+	}
+
+	parsedID, err := strconv.ParseUint(c.Query("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request", "message": err.Error()})
+		return
+	}
+
+	var users types.ListResponse
 	for userid := range h.Clients {
-		users.IDs = append(users.IDs, userid)
+		if userid != parsedID {
+			users.IDs = append(users.IDs, userid)
+		}
 	}
 
 	c.JSON(http.StatusOK, users)
 }
 
-// sendMessages takes csv of clientIDs, and a Body containing byte array. It then puts the byte array in the channel of each client.
+// sendMessages takes csv of clientIDs, and a Body containing byte array. It then puts the byte array in the channel of each types.
 func (h *Hub) sendMessage(c *gin.Context) {
 	if c.Query("ids") == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request", "message": "IDs are required (csv)"})
+		return
+	}
+
+	if c.Request.Body == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request", "message": "Body expected for a sendmessage call"})
 		return
 	}
 
@@ -167,12 +189,6 @@ var upgrader = websocket.Upgrader{
 }
 
 func (h *Hub) websocketInit(c *gin.Context) {
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "Internal Server Error", "message": "Unable to upgrade connection to websocket"})
-		return
-	}
-
 	if c.Query("id") == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request", "message": "ID is required"})
 		return
@@ -189,6 +205,11 @@ func (h *Hub) websocketInit(c *gin.Context) {
 		return
 	}
 
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+
 	// Handles incoming messages
 	go func() {
 		for {
@@ -200,7 +221,7 @@ func (h *Hub) websocketInit(c *gin.Context) {
 				break
 			}
 
-			var incomingMessage client.SendingMessage
+			var incomingMessage types.SendingMessage
 			err = json.Unmarshal(msg, &incomingMessage)
 			if err != nil {
 				log.Printf("Unable unmarshal message bound for %d: %v", connectedID, err)
@@ -237,4 +258,5 @@ func (h *Hub) websocketInit(c *gin.Context) {
 			}
 		}
 	}()
+
 }
