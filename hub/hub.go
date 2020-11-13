@@ -2,9 +2,8 @@ package hub
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
 	"io/ioutil"
+	"log"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -35,15 +34,12 @@ func New() *Hub {
 func (h *Hub) setup() *gin.Engine {
 	router := gin.Default()
 
-	router.GET("/list", h.listUsers)
 	router.GET("/register", h.register)
-	router.GET("/stream", h.stream)
-	router.GET("/identify", h.selfIdentify)
 	router.GET("/ws", h.websocketInit)
+	router.GET("/identify", h.selfIdentify)
+	router.GET("/users", h.listUsers)
+
 	router.POST("/send", h.sendMessage)
-	router.GET("/tester", func(c *gin.Context) {
-		wshandler(c.Writer, c.Request)
-	})
 
 	return router
 }
@@ -92,38 +88,6 @@ func (h *Hub) listUsers(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, users)
-}
-
-// stream is where the client will connect in to to get relayed all the messages from other users. Uses the http streaming functionality
-func (h *Hub) stream(c *gin.Context) {
-	if c.Query("id") == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request", "message": "ID is required"})
-		return
-	}
-
-	parsedID, err := strconv.ParseUint(c.Query("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request", "message": err.Error()})
-		return
-	}
-
-	if ch, exists := h.Clients[parsedID]; !exists || ch == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request", "message": "ID not registered"})
-		return
-	}
-
-	closed := c.Writer.CloseNotify()
-
-	c.Stream(func(w io.Writer) bool {
-		select {
-		case <-closed:
-			return false
-		case msg := <-h.Clients[parsedID]:
-			c.JSON(http.StatusOK, msg)
-			// c.SSEvent(fmt.Sprintf("%d", parsedID), msg)
-			return true
-		}
-	})
 }
 
 // sendMessages takes csv of clientIDs, and a Body containing byte array. It then puts the byte array in the channel of each client.
@@ -205,7 +169,8 @@ var upgrader = websocket.Upgrader{
 func (h *Hub) websocketInit(c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		//TODO
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "Internal Server Error", "message": "Unable to upgrade connection to websocket"})
+		return
 	}
 
 	if c.Query("id") == "" {
@@ -213,63 +178,63 @@ func (h *Hub) websocketInit(c *gin.Context) {
 		return
 	}
 
-	parsedID, err := strconv.ParseUint(c.Query("id"), 10, 64)
+	connectedID, err := strconv.ParseUint(c.Query("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request", "message": err.Error()})
 		return
 	}
 
-	if ch, exists := h.Clients[parsedID]; !exists || ch == nil {
+	if ch, exists := h.Clients[connectedID]; !exists || ch == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request", "message": "ID not registered"})
 		return
 	}
 
-	for {
-		t, msg, err := conn.ReadMessage()
-		if err != nil {
-			//TODO
+	// Handles incoming messages
+	go func() {
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				log.Printf("Error reading message from %d: %v", connectedID, err)
+				conn.Close()
+				delete(h.Clients, connectedID)
+				break
+			}
+
+			var incomingMessage client.SendingMessage
+			err = json.Unmarshal(msg, &incomingMessage)
+			if err != nil {
+				log.Printf("Unable unmarshal message bound for %d: %v", connectedID, err)
+				continue
+			}
+
+			ids := strings.Split(incomingMessage.Recipients, ",")
+
+			for _, id := range ids {
+
+				parsedID, err := strconv.ParseUint(id, 10, 64)
+				if err != nil {
+					log.Printf("Unable to parse recipient %v: %v", id, err)
+					continue
+				}
+
+				h.Clients[parsedID] <- incomingMessage.Data
+			}
 		}
+	}()
 
-		var incomingMessage client.SendingMessage
-		err = json.Unmarshal(msg, incomingMessage)
-		if err != nil {
-			//TODO'
+	// Handles outgoing messages
+	go func() {
+		for {
+			select {
+			case msg := <-h.Clients[connectedID]:
+				err := conn.WriteMessage(1, msg)
+				if err != nil {
+					log.Printf("Error writing message to %d: %v", connectedID, err)
+					conn.Close()
+					delete(h.Clients, connectedID)
+					break
+				}
+			}
 		}
-
-		ids := strings.Split(incomingMessage.Recipients, ",")
-
-		for _, id := range ids {
-			//TODO From here tomorrow
-		}
-	}
-
-	// select {
-	// case msg := <-h.Clients[parsedID]:
-	// }
-	// c.JSON(http.StatusOK, msg)
-	// // c.SSEvent(fmt.Sprintf("%d", parsedID), msg)
-	// return true
-
-}
-
-var wsupgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-}
-
-func wshandler(w http.ResponseWriter, r *http.Request) {
-	conn, err := wsupgrader.Upgrade(w, r, nil)
-	if err != nil {
-		fmt.Println("Failed to set websocket upgrade: %+v", err)
-		return
-	}
-
-	for {
-		t, msg, err := conn.ReadMessage()
-		if err != nil {
-			break
-		}
-		fmt.Println("Received: ", msg)
-		conn.WriteMessage(t, msg)
-	}
+	}()
 }

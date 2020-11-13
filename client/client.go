@@ -5,7 +5,14 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
+)
+
+var (
+	MaxRecipients = 255
+	MaxDataSize   = int64(1024000) // 1024 kilobyes
 )
 
 type ListResponse struct {
@@ -61,7 +68,7 @@ func (c *Client) Register() (uint64, error) {
 
 // ListUsers is used to wrap the /list endpoint from the hub
 func (c *Client) ListUsers() ([]uint64, error) {
-	resp, err := http.Get(fmt.Sprintf("http://%s/list", c.Address))
+	resp, err := http.Get(fmt.Sprintf("http://%s/users", c.Address))
 	if err != nil {
 		return nil, fmt.Errorf("failed to reach hub %s: %s", c.Address, err)
 	}
@@ -98,4 +105,37 @@ func (c *Client) Identify() (uint64, error) {
 	}
 
 	return id, nil
+}
+
+// VerifyRecipients checks that there's not more than MaxRecipient entries, and that they can all be parsed as uint64
+func VerifyRecipients(recipients string) error {
+	ids := strings.Split(recipients, ",")
+	if len(ids) > MaxRecipients {
+		return fmt.Errorf("recipients exceed max length(%d) was: %d", MaxRecipients, len(ids))
+	}
+
+	for _, id := range ids {
+		_, err := strconv.ParseUint(id, 10, 64)
+		if err != nil {
+			return fmt.Errorf("recipient %s could not be parsed as uint64: %s", id, err)
+		}
+	}
+	return nil
+}
+
+// VerifyFile checks that the file exists, and that it is smaller than MaxDataSize
+func VerifyFile(filepath string) error {
+	f, err := os.Open(filepath)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %s", err)
+	}
+	stats, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %s", err)
+	}
+	if stats.Size() > MaxDataSize {
+		return fmt.Errorf("file exceeded max size(%d) was: %d", MaxDataSize, stats.Size())
+	}
+
+	return nil
 }
