@@ -1,6 +1,6 @@
 # message-delivery-system
 
-This project is an excercise to develop a simple message delivery system using websockets.
+This project is an excercise to develop a simple message delivery system
 
 ## How to run
 
@@ -16,4 +16,3 @@ Once running both a hub and a client, you're able to perform the following funct
 3. Relay a message from stdin
 4. Relay a message from file
 5. Exit
-

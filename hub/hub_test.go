@@ -13,6 +13,7 @@ import (
 
 	"github.com/StephenBirch/message-delivery-system/types"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -350,6 +351,93 @@ func TestHub_sendMessage(t *testing.T) {
 				assert.Equal(t, tt.expectedError, errorBody)
 				return
 			}
+		})
+	}
+}
+
+func TestHub_websocketInit(t *testing.T) {
+	tests := []struct {
+		name          string
+		expectedCode  int
+		expectedError gin.H
+		inputID       string
+		inputBody     types.SendingMessage
+		clients       map[uint64]chan []byte
+	}{
+		{
+			name:         "Golden Path",
+			expectedCode: 200,
+			clients: map[uint64]chan []byte{
+				500: make(chan []byte),
+			},
+			inputID: "500",
+			inputBody: types.SendingMessage{
+				Recipients: "500",
+				Data:       []byte("asdfbuyho"),
+			},
+		},
+		{
+			name:         "no id",
+			expectedCode: 400,
+			clients: map[uint64]chan []byte{
+				500: make(chan []byte),
+			},
+			expectedError: gin.H{"message": "ID is required", "status": "Bad Request"},
+		},
+		{
+			name:         "id not uint64",
+			expectedCode: 400,
+			clients: map[uint64]chan []byte{
+				500: make(chan []byte),
+			},
+			expectedError: gin.H{"message": "strconv.ParseUint: parsing \"notuint64\": invalid syntax", "status": "Bad Request"},
+			inputID:       "notuint64",
+		},
+		{
+			name:         "id doesn't exist",
+			expectedCode: 400,
+			clients: map[uint64]chan []byte{
+				500: make(chan []byte),
+			},
+			expectedError: gin.H{"message": "ID not registered", "status": "Bad Request"},
+			inputID:       "200",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := New()
+			h.Clients = tt.clients
+
+			// go func needed since channels are used from within, needs to be threaded
+			go func() { h.Router.Run("localhost:8080") }()
+
+			conn, resp, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://localhost:8080/ws?id=%s", tt.inputID), nil)
+			require.Equal(t, tt.expectedError != nil, err != nil)
+
+			if tt.expectedError != nil {
+				var errorBody gin.H
+				require.NoError(t, json.NewDecoder(resp.Body).Decode(&errorBody))
+				assert.Equal(t, tt.expectedError, errorBody)
+				return
+			}
+
+			// Error paths have returned here, try read & writes on the websocket conn
+			b, err := json.Marshal(tt.inputBody)
+			require.NoError(t, err)
+
+			req, err := http.NewRequest("POST", fmt.Sprintf("/send?ids=%s", tt.inputID), bytes.NewBuffer(b))
+			require.NoError(t, err)
+
+			w := httptest.NewRecorder()
+
+			// go func needed since channels are used from within, needs to be threaded
+			go func() { h.Router.ServeHTTP(w, req) }()
+
+			time.Sleep(time.Second)
+
+			assert.Equal(t, w.Code, 200)
+
+			require.NoError(t, conn.WriteMessage(1, b))
 		})
 	}
 }

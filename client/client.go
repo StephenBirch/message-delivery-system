@@ -14,16 +14,20 @@ import (
 )
 
 var (
+	// MaxRecipients is the maximum clients that can be sent a single message
 	MaxRecipients = 255
-	MaxDataSize   = int64(1024000) // 1024 kilobyes
+	// MaxDataSize refers to the max number of bytes for a single data section
+	MaxDataSize = int64(1024000) // 1024 kilobyes
 )
 
+// Client holds the ID, Address, and Channel for sending messages down the websocket
 type Client struct {
 	ID      uint64
 	Address string
 	Sending chan types.SendingMessage
 }
 
+// New is used to create a new client object
 func New(address string) (*Client, error) {
 	client := &Client{
 		Address: address,
@@ -40,6 +44,7 @@ func New(address string) (*Client, error) {
 	return client, nil
 }
 
+// do wraps http calls, taking in an interface and ensuring that the interface can be unmarshalled into. This interface should be a pointer reference as its not returned
 func (c *Client) do(address string, object interface{}) error {
 	resp, err := http.Get(address)
 	if err != nil {

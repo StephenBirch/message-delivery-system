@@ -64,7 +64,7 @@ func main() {
 				fmt.Printf("Failed to get list of users: %v\n", err)
 				continue
 			}
-			fmt.Printf("Connected users: %v\n", ids.IDs)
+			fmt.Printf("Other users: %v\n", ids.IDs)
 		// Relay message from stdin
 		case "3":
 			fmt.Printf("Enter the recipients IDs (CSV)\n> ")

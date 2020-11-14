@@ -80,7 +80,9 @@ func (h *Hub) register(c *gin.Context) {
 		return
 	}
 
+	// Init a new channel for the ID
 	h.Clients[newID] = make(chan []byte)
+
 	c.JSON(http.StatusOK, newID)
 }
 
@@ -99,6 +101,7 @@ func (h *Hub) listUsers(c *gin.Context) {
 
 	var users types.ListResponse
 	for userid := range h.Clients {
+		// We don't want to add our own ID
 		if userid != parsedID {
 			users.IDs = append(users.IDs, userid)
 		}
@@ -188,6 +191,7 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
+// websocketInit starts & upgrades the connection to a websocket, then runs the reading and writing go funcs. Used for forwarding messages to the different clients.
 func (h *Hub) websocketInit(c *gin.Context) {
 	if c.Query("id") == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "Bad Request", "message": "ID is required"})
@@ -205,6 +209,7 @@ func (h *Hub) websocketInit(c *gin.Context) {
 		return
 	}
 
+	// Upgrade connection to a websocket
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/StephenBirch/message-delivery-system/hub"
 	"github.com/StephenBirch/message-delivery-system/types"
@@ -94,16 +95,38 @@ func TestHub_Identify(t *testing.T) {
 
 func TestHub_ListUsers(t *testing.T) {
 	tests := []struct {
-		name string
+		name    string
+		clients map[uint64]chan []byte
 	}{
 		{
-			name: "Golden Path",
+			name: "Two",
+			clients: map[uint64]chan []byte{
+				100: make(chan []byte),
+				200: make(chan []byte),
+			},
+		},
+		{
+			name: "Many",
+			clients: map[uint64]chan []byte{
+				100:  make(chan []byte),
+				200:  make(chan []byte),
+				300:  make(chan []byte),
+				400:  make(chan []byte),
+				500:  make(chan []byte),
+				600:  make(chan []byte),
+				700:  make(chan []byte),
+				800:  make(chan []byte),
+				900:  make(chan []byte),
+				2900: make(chan []byte),
+				1800: make(chan []byte),
+				2700: make(chan []byte),
+			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := hub.New()
-
+			h.Clients = tt.clients
 			// wrap in a http.Server so we can force shutdown later
 			serv := &http.Server{
 				Addr:    ":8080",
@@ -119,7 +142,7 @@ func TestHub_ListUsers(t *testing.T) {
 
 			users, err := c.ListUsers()
 			require.NoError(t, err)
-			require.Equal(t, len(users.IDs), 1)
+			require.Equal(t, len(users.IDs), len(tt.clients)-1)
 
 			serv.Shutdown(context.Background())
 		})
@@ -230,9 +253,6 @@ func TestHub_InitWebsocket(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, c)
 
-			fmt.Println(h.Clients)
-			fmt.Println()
-
 			if tt.changeID {
 				c.ID = 0
 			}
@@ -263,7 +283,6 @@ func TestHub_WriteMessages(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fmt.Println(tt.name)
 			h := hub.New()
 
 			// wrap in a http.Server so we can force shutdown later
@@ -280,9 +299,6 @@ func TestHub_WriteMessages(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, c)
 
-			fmt.Println(h.Clients)
-			fmt.Println()
-
 			conn, err := c.InitWebsocket()
 			require.NoError(t, err)
 			defer conn.Close()
@@ -294,6 +310,8 @@ func TestHub_WriteMessages(t *testing.T) {
 			}()
 
 			c.Sending <- types.SendingMessage{Recipients: fmt.Sprint(c.ID), Data: []byte(tt.send)}
+
+			time.Sleep(time.Second)
 
 			serv.Shutdown(context.Background())
 		})
